@@ -9,6 +9,6 @@ set -a
 source .env
 set +a
 
-pg_dump "$DATABASE_URL" --no-data -O -x | grep -v "^--" | grep -v "SET" | grep -Ev '^\\' | cat -s > ./postgres_db.sql
+pg_dump "$DATABASE_URL" -s --no-data -O -x | grep -v "^--" | grep -v "SET" | grep -Ev '^\\' | grep -v "^SELECT pg" | sed 's/public\.//g' | cat -s > ./postgres_db.sql
 
 echo "Database dumped."
