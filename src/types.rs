@@ -1,47 +1,57 @@
-use chrono::{DateTime, Local};
+use chrono::{DateTime, Utc};
 use serde::{Serialize, Deserialize};
 use sqlx::{FromRow, Type};
 use sqlx::types::Json;
 use uuid::Uuid;
+use utoipa::ToSchema;
 
-#[derive(Serialize, FromRow)]
+#[derive(Serialize, FromRow, ToSchema)]
 pub struct Session {
     pub id: Uuid,
     
     #[sqlx(flatten)] 
     pub event: Event,
     
-    pub starts: DateTime<Local>,
-    pub ends: DateTime<Local>,
+    pub starts: DateTime<Utc>,
+    pub ends: DateTime<Utc>,
     pub mode: EventMode,
+    
+    // Tell Utoipa to document this as an Option<Vec<Person>>
+    #[schema(value_type = Option<Vec<Person>>)] 
     pub presentators: Option<Json<Vec<Person>>>, 
+    
+    #[schema(value_type = Option<Location>)]
     pub location: Option<Json<Location>>
 }
 
-#[derive(Serialize, FromRow)]
+#[derive(Serialize, FromRow, ToSchema)]
 #[serde(rename_all="kebab-case")]
 pub struct Event {
     #[sqlx(rename = "event_id")]
     pub id: Uuid,
     pub title: String,
+    
+    #[schema(value_type = Option<Entity>)]
     pub entity: Option<Json<Entity>>,
+    
+    #[schema(value_type = Option<Person>)]
     pub master: Option<Json<Person>>,
+    
     pub event_type: EventType, 
 }
-
-#[derive(Serialize, Deserialize, FromRow, Debug)] 
+#[derive(Serialize, Deserialize, FromRow, Debug, ToSchema)] 
 pub struct Person {
     pub id: Uuid,
     pub name: String,
 }
 
-#[derive(Serialize, Deserialize, FromRow, Debug)]
+#[derive(Serialize, Deserialize, FromRow, Debug, ToSchema)]
 pub struct Entity {
     pub id: Uuid,
     pub name: String,
 }
 
-#[derive(Serialize, Deserialize, FromRow, Debug)]
+#[derive(Serialize, Deserialize, FromRow, Debug, ToSchema)]
 pub struct Location {
     pub id: Uuid,
     pub session: Uuid,
@@ -50,7 +60,7 @@ pub struct Location {
     pub description: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, FromRow, Debug)]
+#[derive(Serialize, Deserialize, FromRow, Debug, ToSchema)]
 pub struct Room {
     pub id: Uuid, 
     pub campus: String,
@@ -59,7 +69,7 @@ pub struct Room {
     pub sub: Option<String>,
 }
 
-#[derive(Deserialize, Serialize, Debug, PartialEq, Type)]
+#[derive(Deserialize, Serialize, Debug, PartialEq, Type, ToSchema)]
 #[serde(rename_all = "lowercase")] 
 #[sqlx(type_name = "event_mode", rename_all = "lowercase")]
 pub enum EventMode {
@@ -68,7 +78,7 @@ pub enum EventMode {
     Hibrido,
 }
 
-#[derive(Deserialize, Serialize, Debug, PartialEq, Type)]
+#[derive(Deserialize, Serialize, Debug, PartialEq, Type, ToSchema)]
 #[serde(rename_all = "lowercase")] 
 #[sqlx(type_name = "event_type", rename_all = "lowercase")] 
 pub enum EventType {
