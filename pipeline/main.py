@@ -3,6 +3,17 @@ import tomllib
 from datetime import datetime
 from typing import Any
 import re
+import uuid
+import psycopg
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+DB_URL = os.getenv("DATABASE_URL", "")
+
+if DB_URL is None:
+	raise EnvironmentError("MISSING DATABASE_URL")
 
 TYPE_MAP : dict[str, Any] = {
 	"str": str,
@@ -266,11 +277,170 @@ def parse_values(df : pd.DataFrame) -> pd.DataFrame:
 	result_df = df.apply(parse_row, axis=1)
 	return result_df
 
+def get_distinc_presentators(df) -> list[str]:
+	l = []
+	for presentator in df["presentator"]:
+		for p in presentator	:
+			if p not in l:
+				l.append(p)
+	return l
+
+def get_distinc_masters(df) -> list[str]:
+	l = []
+	for master in df["master"]:
+		if master not in l:
+			l.append(master)
+	return l
+
+class Location:
+	id : uuid.UUID
+	session : uuid.UUID
+	link : str | None
+	def __init__(self, id : uuid.UUID, session : uuid.UUID, link : str | None) -> None:
+		self.id = id
+		self.session = session
+		self.link = link
+
+class Room (Location):
+	campus : str
+	building : str
+	room : str
+	def __init__(self, id, session, link, campus, building, room) -> None:
+		self.id = id
+		self.session = session
+		self.link = link
+		self.campus = campus
+		self.building = building
+		self.room = room
+
+class RandomLocation (Location):
+	description : str
+	def __init__(self, id : uuid.UUID, session : uuid.UUID, link : str | None, desc : str) -> None:
+		self.id = id
+		self.session = session
+		self.link = link
+		self.description = desc
+
+class Person:
+	id : uuid.UUID
+	name : str
+	def __init__(self, id : uuid.UUID, name : str) -> None:
+		self.id = id
+		self.name = name
+	def __eq__(self, value: object) -> bool:
+		if not isinstance(value, Person):
+			return False
+
+		if value.name == self.name:
+			return True
+
+		return False
+
+class Entity:
+	id: uuid.UUID
+	name : str
+	def __init__(self, id : uuid.UUID, name : str) -> None:
+		self.id = id
+		self.name = name
+
+class Event:
+	id : uuid.UUID
+	title : str
+	entity : Entity
+	master : Person
+	type : str
+
+	def __init__(self, id : uuid.UUID, title : str, entity : Entity, master : Person, type : str) -> None:
+		self.id = id
+		self.title = title
+		self.entity = entity
+		self.master = master
+
+		if specs["valid-type-values"][type]:
+			self.type = type
+		else:
+			raise TypeError(f"Wrong event type!, {type} is no a valid type.")
+
+class Session:
+	id : uuid.UUID
+	starts : datetime
+	ends : datetime
+	event : Event
+	def __init__(self, id:uuid.UUID, starts:datetime, ends:datetime, event:Event) -> None:
+		self.id = id
+		self.starts = starts
+		self.ends = ends
+		self.event = event
+
+# No es muy util afuera de este script
+def find[T](hay : list[T], needle: T) -> T | None:
+	for v in hay:
+		if v == needle:
+			return v
+
+def load_to_database(df : pd.DataFrame):
+	random_locations : list[RandomLocation] = []
+	room_locations : list[Room] = []
+	virtual_locations : list[Location] = []
+	persons : list[Person] = []
+	events : list[Event] = []
+	sessions : list[Session] = []
+
+	for i, row in df.iterrows():
+		start : datetime = row['start']
+		end : datetime = row['end']
+		title : str = row['title']
+		place : str = row['place']
+		link : str = row['link']
+		_mode : str = row['mode'] # Esto se redefine de forma implicita, no se guarda en la db
+		act_type : str = row['type']
+		presentator : list[str] = row['presentator']
+		master : str = row['master']
+		entity : str = row['entity']
+		building : str | None = row['building']
+		room : str | None = row['room']
+		campus : str = row['campus']
+
+		ps : list[Person] = []
+		master_o : Person | None = None
+		location : RandomLocation | Location | Room | None = None
+		session_id = uuid.uuid7()
+		if master:
+			master_o = Person(uuid.uuid7(), master)
+			f = find(persons, master_o)
+			if f:
+				master_o = f
+			else:
+				persons.append(master_o)
+		
+		for n in presentator:
+			p = Person(uuid.uuid7(), n)
+			f = find(persons, p)
+			if f:
+				ps.append(f)
+			else:
+				ps.append(p)
+				persons.append(p)
+
+		if building and room:
+			location = Room(uuid.uuid7(), session_id, link, campus, building, room)
+		elif not place and link:
+			location = Location(uuid.uuid7(), session_id, link)
+		else:
+			location = RandomLocation(uuid.uuid7(), session_id, link, place)
+
+
+	conn = psycopg.connect(DB_URL)
+	cursor = conn.cursor()
+
+
 df = load_file("./pipeline/input_data.xlsx", "Actividades")
 df = verify_fields(df)
 (df, rejected) = validate_values(df)
 df = parse_values(df)
 
+print(df.columns.tolist())
+
 rejected.to_csv("./pipeline/invalid.csv")
 df.to_csv("./pipeline/out.csv", index=False)
-df.to_excel("./pipeline/out.xlsx", sheet_name="Actividades")
+df.to_excel("./pipeline/out.xlsx", sheet_name="Actividades")	
