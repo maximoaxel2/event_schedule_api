@@ -274,4 +274,6 @@ df = verify_fields(df)
 (df, rejected) = validate_values(df)
 df = parse_values(df)
 
+df.to_csv("./pipeline/out.csv", index=False)
+
 print(df['presentator'])
