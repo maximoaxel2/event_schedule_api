@@ -4,6 +4,8 @@ from datetime import datetime
 from typing import Any
 import re
 
+OUT_DIRECTORY = "./pipeline/out/"
+
 TYPE_MAP : dict[str, Any] = {
 	"str": str,
 	"date": datetime.date,
@@ -271,6 +273,6 @@ df = verify_fields(df)
 (df, rejected) = validate_values(df)
 df = parse_values(df)
 
-rejected.to_csv("./pipeline/invalid.csv")
-df.to_csv("./pipeline/out.csv", index=False)
-df.to_excel("./pipeline/out.xlsx", sheet_name="Actividades")
+rejected.to_csv(OUT_DIRECTORY + "invalid.csv")
+df.to_csv(OUT_DIRECTORY + "out.csv", index=False)
+df.to_excel(OUT_DIRECTORY + "out.xlsx", sheet_name="Actividades")
