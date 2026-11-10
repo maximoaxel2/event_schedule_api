@@ -2,3 +2,4 @@
 target/
 .venv
 .vscode
+pipeline/.~lock.input_data.xlsx#

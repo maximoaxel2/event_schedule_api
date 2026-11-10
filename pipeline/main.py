@@ -27,7 +27,11 @@ if not specs['valid-type-values']:
 	raise IndexError('Missing valid-type-values header')
 if not isinstance(specs["valid-type-values"], dict):
 	raise TypeError('Wrong type for valid-type-values')
-
+if not specs["valid-mode-values"]:
+	raise IndexError("Missing valid-mode-values")
+if not isinstance(specs["valid-mode-values"], list):
+	t = type(specs['valid-mode-values'])
+	raise TypeError(f"Wrong type for valid-mode-values, expected list, got {t}")
 
 def load_file(path : str, sheet : str = "0") -> pd.DataFrame:
    df: pd.DataFrame = pd.read_excel( # type: ignore[reportUnknownMemberType]
@@ -38,7 +42,6 @@ def load_file(path : str, sheet : str = "0") -> pd.DataFrame:
    return df
 
 def is_meeting_link(link: str) -> bool:
-
 	if re.match(r"https://teams.microsoft.com/.*", link):
 		return True
 
@@ -92,7 +95,6 @@ def validate_values_row(row : pd.Series) -> pd.Series | None:
 			start_time.second
 			)
 	except:
-		print("datetime")
 		return None
 	try:
 		end_datetime = datetime(
@@ -104,12 +106,10 @@ def validate_values_row(row : pd.Series) -> pd.Series | None:
 			end_time.second
 		)
 	except:
-		print("datetime")
 		return None
 
 	activity_type = row["Actividad"]
 	if not activity_type:
-		print("type")
 		return None
 
 	place : str | None = row["Salón"]
@@ -117,30 +117,29 @@ def validate_values_row(row : pd.Series) -> pd.Series | None:
 
 	mode : str | None = row["Tipo"]
 	if not mode:
-		print("mode")
 		return None
+
+	if mode.strip().lower() not in specs["valid-mode-values"]:
+		return None
+
+	mode = mode.strip().lower()
 
 	if mode.lower() == "presencial":
 		if not place:
-			print("place")
 			return None
 		mode = mode.lower()
 
 	if mode.lower() == "virtual":
 		if not link:
-			print("link")
 			return None
 
 		if not is_meeting_link(link):
-			print("no valid link")
 			return None
 		
 		mode = mode.lower()
 
-
 	title = row["Título"]
 	if not title:
-		print("no title")
 		return None
 
 	presentator: str | None = row["Ponente"]
@@ -176,7 +175,6 @@ def validate_values(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     for _, row in df.iterrows():
         new_row = validate_values_row(row)
         if new_row is None:
-            print("no valid")
             rejected_data : dict[str, Any] = {
                 "start": f"{row['Fecha inicio']} {row['Hora inicio']}",
                 "end": f"{row['Fecha fin']} {row['Hora fin']}",
@@ -200,13 +198,8 @@ def validate_values(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     return (new, rejected)
 
 presentator_split_pattern = r"\s*(?:,|\/|\by\b)\s*"
-invalid_presentators = [
-	"-",
-	"N/A",
-	"UACJ Campus IIT",
-	"n.a" # No manchen quien puso n.a,
-	"Alumnos proximos a egresar" # Este es un "hailmary"
-]
+invalid_presentators = specs["invalid_presentators"]
+
 def parse_presentators(presentators : str) -> list[str]:
 
 	if presentators in invalid_presentators:
@@ -214,7 +207,7 @@ def parse_presentators(presentators : str) -> list[str]:
 
 	names = re.split(presentator_split_pattern, presentators)
 	# Quita cadenas vacias
-	return [n for n in names if n]
+	return [n for n in names if n and n not in invalid_presentators]
 		
 
 # Principal
@@ -234,6 +227,8 @@ def parse_row(row : pd.Series) -> pd.Series:
 	if activity_type.lower() not in specs["valid-type-values"]:
 		activity_type = 'otra'
 
+	activity_type = activity_type.lower()
+
 	place : str = row.get("place", "").strip()
 
 	match = re.search(room_pattern, place)
@@ -242,7 +237,7 @@ def parse_row(row : pd.Series) -> pd.Series:
 	room : str | None = None
 
 	if match is not None:
-		campus = match.group("campus")
+		campus = match.group("campus") or specs["default_campus"]
 		building = match.group("building")
 		room = match.group("room")
 	else:
@@ -257,6 +252,8 @@ def parse_row(row : pd.Series) -> pd.Series:
 	if isinstance(c_presentator, str):
 		presentators = parse_presentators(c_presentator.strip())
 
+	# ! Aun falta implementar para colapsar las entidades ej (Universidad Autonoma de Ciudad Juarez -> UACJ)
+	
 	row["presentator"] = presentators
 	row["building"] = building
 	row["room"] = room
@@ -274,6 +271,6 @@ df = verify_fields(df)
 (df, rejected) = validate_values(df)
 df = parse_values(df)
 
+rejected.to_csv("./pipeline/invalid.csv")
 df.to_csv("./pipeline/out.csv", index=False)
-
-print(df['presentator'])
+df.to_excel("./pipeline/out.xlsx", sheet_name="Actividades")

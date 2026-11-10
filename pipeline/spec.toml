@@ -1,3 +1,17 @@
+valid-mode-values = [
+   "presencial",
+   "virtual"
+]
+default_campus = "IIT"
+
+invalid_presentators = [
+	"-",
+	"N/A",
+	"UACJ Campus IIT",
+	"n.a", # No manchen quien puso n.a
+	"Alumnos proximos a egresar" # Este es un "hailmary"
+]
+
 [valid-type-values] 
 "conferencia" = "conferencia"
 "taller" = "taller"
@@ -17,7 +31,6 @@
 "mesa de diálogo" = "mesa de diálogo"
 "capacitación" = "capacitación"
 default = "otra"
-
 
 [column-types]
 [column-types.first]
