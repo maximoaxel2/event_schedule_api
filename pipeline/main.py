@@ -9,13 +9,6 @@ import os
 import click
 from dotenv import load_dotenv
 
-load_dotenv()
-
-DB_URL = os.getenv("DATABASE_URL", "")
-
-if DB_URL is None:
-	raise EnvironmentError("MISSING DATABASE_URL")
-
 OUT_DIRECTORY = "./pipeline/out/"
 # No file extension
 OUT_FILE_NAME = "out"
@@ -544,4 +537,12 @@ if click.confirm("Save to outfiles?", default=True):
 if click.confirm("Save to database? (can't undo)", default=False):
 	print("Whoops, im still implementing that.")
 	exit()
+
+	load_dotenv()
+
+	DB_URL = os.getenv("DATABASE_URL", "")
+
+	if DB_URL is None:
+		raise EnvironmentError("MISSING DATABASE_URL")
+
 	load_to_database(df, click.confirm("Purge database? (Risky)", default=False))
