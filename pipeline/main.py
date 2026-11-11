@@ -6,6 +6,7 @@ import re
 import uuid
 import psycopg
 import os
+import click
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -16,6 +17,10 @@ if DB_URL is None:
 	raise EnvironmentError("MISSING DATABASE_URL")
 
 OUT_DIRECTORY = "./pipeline/out/"
+# No file extension
+OUT_FILE_NAME = "out"
+REJECTED_FILE_NAME = "rejected"
+
 
 TYPE_MAP : dict[str, Any] = {
 	"str": str,
@@ -45,6 +50,10 @@ if not specs["valid-mode-values"]:
 if not isinstance(specs["valid-mode-values"], list):
 	t = type(specs['valid-mode-values'])
 	raise TypeError(f"Wrong type for valid-mode-values, expected list, got {t}")
+if not specs['entity-colapse-map']:
+	raise IndexError("Missing entity-colapse-map")
+if not isinstance(specs["entity-colapse-map"], dict):
+	raise TypeError(f"Wrong type for entity-colapse-map, expected dict, got {type(specs["entity-colapse-map"])}")
 
 def load_file(path : str, sheet : str = "0") -> pd.DataFrame:
    df: pd.DataFrame = pd.read_excel( # type: ignore[reportUnknownMemberType]
@@ -180,7 +189,6 @@ def validate_values_row(row : pd.Series) -> pd.Series | None:
 
 	return pd.Series(data)
 	
-
 def validate_values(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     rejected_list : list[Any] = []
     new_list : list[Any] = []
@@ -221,7 +229,6 @@ def parse_presentators(presentators : str) -> list[str]:
 	names = re.split(presentator_split_pattern, presentators)
 	# Quita cadenas vacias
 	return [n for n in names if n and n not in invalid_presentators]
-		
 
 # Principal
 room_pattern = r"^(?P<campus>CUAUH|CU)?\s*(?P<building>[A-Z]\d?)\b\s*(?P<room>\d*)"
@@ -279,20 +286,43 @@ def parse_values(df : pd.DataFrame) -> pd.DataFrame:
 	result_df = df.apply(parse_row, axis=1)
 	return result_df
 
-def get_distinc_presentators(df) -> list[str]:
-	l = []
-	for presentator in df["presentator"]:
-		for p in presentator	:
-			if p not in l:
-				l.append(p)
-	return l
+# def get_distinc_presentators(df) -> list[str]:
+# 	l = []
+# 	for presentator in df["presentator"]:
+# 		for p in presentator	:
+# 			if p not in l:
+# 				l.append(p)
+# 	return l
 
-def get_distinc_masters(df) -> list[str]:
-	l = []
-	for master in df["master"]:
-		if master not in l:
-			l.append(master)
-	return l
+# def get_distinc_masters(df) -> list[str]:
+# 	l = []
+# 	for master in df["master"]:
+# 		if master not in l:
+# 			l.append(master)
+# 	return l
+
+unusual_entity_names : list[str] = []
+
+def norm_row(row : pd.Series) -> pd.Series:
+	ent_name = row["entity"]
+	known = False
+	for i, v in specs['entity-colapse-map'].items():
+		if i == ent_name:
+			known = True
+			break
+		if ent_name in  v:
+			ent_name = i
+			known = True
+
+	if not known and ent_name not in unusual_entity_names:
+		unusual_entity_names.append(ent_name)
+
+	row["entity"] = ent_name
+	
+	return row
+
+def normalize_values(df : pd.DataFrame) -> pd.DataFrame:
+	return df.apply(norm_row, axis=1)
 
 class Location:
 	id : uuid.UUID
@@ -303,16 +333,30 @@ class Location:
 		self.session = session
 		self.link = link
 
-class Room (Location):
+class Room:
 	campus : str
 	building : str
 	room : str
-	def __init__(self, id, session, link, campus, building, room) -> None:
+	def __init__(self, id, campus, building, room) -> None:
 		self.id = id
-		self.session = session
-		self.link = link
 		self.campus = campus
 		self.building = building
+		self.room = room
+
+	def __eq__(self, value: object) -> bool:
+		if not isinstance(value, Room):
+			return False
+
+		if self.campus == value.campus and self.building == value.building and self.room == value.room:
+			return True
+
+		return False
+
+class RoomLocation (Location):
+	room : Room
+
+	def __init__(self, id: uuid.UUID, session: uuid.UUID, link: str | None, room : Room) -> None:
+		super().__init__(id, session, link)
 		self.room = room
 
 class RandomLocation (Location):
@@ -344,6 +388,15 @@ class Entity:
 	def __init__(self, id : uuid.UUID, name : str) -> None:
 		self.id = id
 		self.name = name
+
+	def __eq__(self, value: object) -> bool:
+			if not isinstance(value, Entity):
+				return False
+	
+			if value.name == self.name:
+				return True
+	
+			return False
 
 class Event:
 	id : uuid.UUID
@@ -380,13 +433,15 @@ def find[T](hay : list[T], needle: T) -> T | None:
 		if v == needle:
 			return v
 
-def load_to_database(df : pd.DataFrame):
+def load_to_database(df : pd.DataFrame, purge_db : bool):
 	random_locations : list[RandomLocation] = []
-	room_locations : list[Room] = []
+	room_locations : list[RoomLocation] = []
 	virtual_locations : list[Location] = []
 	persons : list[Person] = []
 	events : list[Event] = []
 	sessions : list[Session] = []
+	entities : list[Entity] = []
+	rooms : list[Room] = []
 
 	for i, row in df.iterrows():
 		start : datetime = row['start']
@@ -394,11 +449,10 @@ def load_to_database(df : pd.DataFrame):
 		title : str = row['title']
 		place : str = row['place']
 		link : str = row['link']
-		_mode : str = row['mode'] # Esto se redefine de forma implicita, no se guarda en la db
 		act_type : str = row['type']
 		presentator : list[str] = row['presentator']
 		master : str = row['master']
-		entity : str = row['entity']
+		entity_str : str = row['entity']
 		building : str | None = row['building']
 		room : str | None = row['room']
 		campus : str = row['campus']
@@ -407,6 +461,7 @@ def load_to_database(df : pd.DataFrame):
 		master_o : Person | None = None
 		location : RandomLocation | Location | Room | None = None
 		session_id = uuid.uuid7()
+
 		if master:
 			master_o = Person(uuid.uuid7(), master)
 			f = find(persons, master_o)
@@ -414,6 +469,8 @@ def load_to_database(df : pd.DataFrame):
 				master_o = f
 			else:
 				persons.append(master_o)
+
+		assert(master_o)
 		
 		for n in presentator:
 			p = Person(uuid.uuid7(), n)
@@ -425,24 +482,66 @@ def load_to_database(df : pd.DataFrame):
 				persons.append(p)
 
 		if building and room:
-			location = Room(uuid.uuid7(), session_id, link, campus, building, room)
+			room_o = Room(uuid.uuid7(), campus, building, room)
+			_f = find(rooms, room_o)
+			if _f:
+				room_o = _f
+
+			location = RoomLocation(uuid.uuid7(), session_id, link, room_o)
+
+			room_locations.append(location)
 		elif not place and link:
 			location = Location(uuid.uuid7(), session_id, link)
+			virtual_locations.append(location)
 		else:
 			location = RandomLocation(uuid.uuid7(), session_id, link, place)
+			random_locations.append(location)
 
+		entity = Entity(uuid.uuid7(), entity_str)
+
+		_f = find(entities, entity)
+
+		if _f:
+			entity = _f
+		else:
+			entities.append(entity)
+
+		event = Event(uuid.uuid7(), title, entity, master_o, act_type)
+		session = Session(session_id, start, end, event)
+
+		events.append(event)
+		sessions.append(session)
 
 	conn = psycopg.connect(DB_URL)
 	cursor = conn.cursor()
 
+	if purge_db:
+		pass
 
+# PIPELINE!
 df = load_file("./pipeline/input_data.xlsx", "Actividades")
 df = verify_fields(df)
 (df, rejected) = validate_values(df)
 df = parse_values(df)
+df = normalize_values(df)
 
-print(df.columns.tolist())
+print(f"Rejected {len(rejected)} rows, saved to {OUT_DIRECTORY + REJECTED_FILE_NAME + ".*"}")
 
-rejected.to_csv(OUT_DIRECTORY + "invalid.csv")
-df.to_csv(OUT_DIRECTORY + "out.csv", index=False)
-df.to_excel(OUT_DIRECTORY + "out.xlsx", sheet_name="Actividades")
+if click.confirm("Save to outfiles?", default=True):
+	try:
+		os.mkdir(OUT_DIRECTORY)
+	except FileExistsError:
+		pass
+	except Exception as e:
+		print(f"Could not create directory {OUT_DIRECTORY}: {e}")
+		exit()
+
+	rejected.to_csv(OUT_DIRECTORY + REJECTED_FILE_NAME + ".csv")
+	rejected.to_excel(OUT_DIRECTORY + REJECTED_FILE_NAME + ".xlsx", sheet_name="Actividades")
+	df.to_csv(OUT_DIRECTORY + OUT_FILE_NAME + ".csv", index=False)
+	df.to_excel(OUT_DIRECTORY + OUT_FILE_NAME + ".xlsx", sheet_name="Actividades")
+
+if click.confirm("Save to database? (can't undo)", default=False):
+	print("Whoops, im still implementing that.")
+	exit()
+	load_to_database(df, click.confirm("Purge database? (Risky)", default=False))

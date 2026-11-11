@@ -46,3 +46,11 @@ default = "otra"
 "Empresa / Institución" = "str"	
 "Maestro de ceremonias" = "str"
 "Enlace" = "str|None"
+
+# The normal name is the index, points to a list of alt names
+[entity-colapse-map]
+"UACJ" = ["Universidad Autónoma de Ciudad Juárez", "uacj"]
+"IIT UACJ" = ["Instituto de Ingeniería y Tecnología-UACJ"]
+"Jhonson & Jhonson" = ["Johnson"]
+"Universidad Tecnológica Paso del Norte" = ["Universidad de Texas, El Paso (UTEP)"]
+"Siemens" = ["SIEMENS"]
